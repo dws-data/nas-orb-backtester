@@ -1,0 +1,67 @@
+# Data (large binary files — download separately via data/fetcher.py)
+data/cache/
+data/raw/
+data/databento_api_key.txt
+
+# Generated outputs (bulk trade results — not committed)
+results/continuous/
+
+# Charts — charts/samples/ IS committed (canonical variant examples)
+# Only exclude bulk/generated chart dirs if they exist
+logs/
+
+# Experimental / off-git work (fib targets, BE stop, TP enhancements)
+experimental/
+
+# Entry point / runner / visualisation (config details not published)
+run_no_charts.py
+regen_charts.py
+viz_swing_logic.py
+viz_swing_real.py
+
+# Data pipeline scripts (not part of the core engine)
+data/fetcher.py
+data/databento_loader.py
+data/download_continuous.py
+
+# Utility scripts
+scripts/
+
+# Internal research docs — not part of portfolio
+decisions/
+features/
+
+# Screenshots — all local only
+screenshots/
+
+# Chart renderer script
+charts/trade_chart.py
+charts/__init__.py
+
+# Personal working notes
+diary/
+TODO.md
+TRADE VARIANTS.docx
+
+# Archive (old iterations — kept locally, not in git)
+archive/
+
+# Screenshots (only swing_logic_git/ is committed)
+screenshots/swing_logic/
+screenshots/other/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
