@@ -98,3 +98,7 @@ Full sample set: [`charts/samples/`](charts/samples/)
 ```
 pip install -r requirements.txt
 ```
+
+---
+
+*All strategy design, methodology, and analytical decisions are my own. [Claude](https://claude.ai) (Anthropic) assisted with Python implementation.*
