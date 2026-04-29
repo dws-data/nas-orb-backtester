@@ -74,6 +74,11 @@ def run(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
                 variants = []
 
             for threshold, entry_level, sl_type in variants:
+                # Skip invalid combos where entry and stop are the same VP level
+                if direction == "long"  and entry_level == "val" and sl_type == "vp_extreme":
+                    continue
+                if direction == "short" and entry_level == "vah" and sl_type == "vp_extreme":
+                    continue
                 trade = run_variant(ctx, threshold, entry_level, sl_type)
                 if trade is not None:
                     trade["variant_id"] = f"{threshold}pct_{entry_level}_{sl_type}_{confirm_by}"
@@ -87,7 +92,8 @@ def run(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
                         struct = get_live_structure(
                             structure_lookup[tf], df_et_full, entry_time, tf
                         )
-                        trade[f"aligned_{tf}"] = (struct == expected)
+                        trade[f"dir_{tf}"]     = struct                  # absolute: 'bullish' or 'bearish'
+                        trade[f"aligned_{tf}"] = (struct == expected)    # relative: True = with trend
                     trade_records.append(trade)
 
     days_df   = pd.DataFrame(day_records)   if day_records   else pd.DataFrame()

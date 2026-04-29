@@ -7,8 +7,8 @@ STOP_BUFFER_PCT    = 0.030        # fraction of ORB size beyond stop level to en
 # At a typical 2026 ORB of ~180pts: spread=1.8pts, buffer=5.4pts
 # At a 2017 ORB of ~16pts:          spread=0.16pts, buffer=0.48pts
 LONG_THRESHOLDS    = [10, 20, 30]
-SHORT_THRESHOLDS   = [10, 20, 30]
-THRESHOLDS         = [10, 20, 30]
+SHORT_THRESHOLDS   = [10, 20, 25, 30]
+THRESHOLDS         = [10, 20, 25, 30]
 CONFIRMATION_TYPES = ["close"]
 
 # All times in US/Eastern (America/New_York) — handles EST/EDT automatically.
@@ -22,18 +22,32 @@ ENTRY_CUTOFF = "14:59"
 FORCE_CLOSE  = "15:40"
 TZ           = "America/New_York"
 
+# Target mode:
+#   "fib" — ORB extreme + FIB_TARGET × ORB size  (default)
+#   "1r"  — entry + stop_dist (true 1:1R)
+TARGET_MODE = "fib"
+
+# Fib target: ORB extreme + FIB_TARGET × ORB size.
+# 1.272 — chosen 2026-04-19 based on full regime analysis (see experimental/fib_tp/compare_05_1272_2026-04-19.md).
+# Switch to 0.5 if ORB% drops below ~0.35% for a sustained period (low-vol regime).
+FIB_TARGET = 1.272
+
 # Valid (threshold, entry_level, sl_type) combinations — separated by direction.
 #
 # entry_level : "vah" | "poc" | "val"
 # sl_type     : "orb"        → ORB extreme (orb_low for long, orb_high for short)
 #               "vp_extreme" → opposite VP boundary (val for long, vah for short)
 #               "poc"        → Point of Control
+#
+# INVALID combinations (entry == stop level — near-zero win rate, do not generate):
+#   Long:  entry_level="val" + sl_type="vp_extreme"  → stop IS val (same level as entry)
+#   Short: entry_level="vah" + sl_type="vp_extreme"  → stop IS vah (same level as entry)
 
-# Canonical variants — 15m ORB window (selected 2026-04-18).
-# Long:  10pct_vah_orb — 484 trades, 53.5% WR, +0.063R, +30.7R, -14.9R DD
-# Short: 30pct_poc_orb — 288 trades, 55.2% WR, +0.094R, +27.1R, -11.7R DD
-LONG_VARIANTS  = [(10, "vah", "orb")]
-SHORT_VARIANTS = [(30, "poc", "orb")]
+# Canonical variants — 15m ORB window, 1.272x fib target.
+# Long:  10pct_poc_orb — 397 trades, 36.8% WR, +0.167R, +66.46R, -20.22R DD (updated 2026-04-20, POC beats VAH in 3/4 1h+4h regime combos)
+# Short: 25pct_poc_orb — 308 trades, 39.9% WR, +0.217R, +66.76R, -19.66R DD (updated 2026-04-20, 0 neg years vs 1 for 30pct)
+LONG_VARIANTS  = [(10, "poc", "orb")]
+SHORT_VARIANTS = [(25, "poc", "orb")]
 
 
 def _first_true(mask: np.ndarray) -> int:
@@ -303,7 +317,12 @@ def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str) -
     if stop_dist <= 0:
         return None
 
-    target_clean = (entry_price + stop_dist) if direction == "long" else (entry_price - stop_dist)
+    orb_extreme  = orb_high if direction == "long" else orb_low
+    if TARGET_MODE == "1r":
+        target_clean = (entry_price + stop_dist) if direction == "long" else (entry_price - stop_dist)
+    else:
+        fib_dist     = FIB_TARGET * orb_size
+        target_clean = (orb_extreme + fib_dist) if direction == "long" else (orb_extreme - fib_dist)
 
     # Pull pre-extracted arrays from context
     po_low      = ctx["_po_low"]
@@ -339,6 +358,19 @@ def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str) -
 
     entry_time = po_times[after_start + entry_pos]
 
+    # Max extension from ORB extreme during the breakout-and-retrace phase only
+    # (confirmation bar through entry bar inclusive). This is the "initial breakout
+    # size" before price pulled back to the entry level.
+    pre_slice = slice(confirmed_idx, after_start + entry_pos + 1)
+    if direction == "long":
+        pre_entry_breakout_pct = round(
+            max(0.0, float(po_high[pre_slice].max()) - orb_high) / orb_size * 100, 1
+        )
+    else:
+        pre_entry_breakout_pct = round(
+            max(0.0, orb_low - float(po_low[pre_slice].min())) / orb_size * 100, 1
+        )
+
     # --- Exit scan: from entry bar onward ---
     exit_start     = after_start + entry_pos
     exit_low       = po_low[exit_start:]
@@ -349,10 +381,10 @@ def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str) -
 
     if direction == "long":
         stop_mask   = exit_low   <= stop_clean   + spread
-        target_mask = exit_high  >= target_clean + spread
+        target_mask = exit_high  >= target_clean          # price tags fib level → limit order at target_clean - spread fills
     else:
         stop_mask   = exit_high  >= stop_clean   - spread
-        target_mask = exit_low   <= target_clean - spread
+        target_mask = exit_low   <= target_clean          # price tags fib level → limit order at target_clean + spread fills
 
     # Entry bar (index 0): target cannot fire on the same bar entry was taken.
     # For retracement entries the favourable level may have been breached
@@ -379,7 +411,7 @@ def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str) -
             exit_pos    = stop_pos
         else:
             exit_reason = "target"
-            exit_price  = target_clean
+            exit_price  = target_clean - spread if direction == "long" else target_clean + spread
             exit_time   = exit_times[target_pos]
             exit_pos    = target_pos
     elif eod_pos < m:
@@ -445,6 +477,7 @@ def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str) -
         "mae_r":                 mae_r,
         "mfe_before_mae":        mfe_before_mae,
         "trade_duration_mins":   trade_duration_mins,
-        "entry_delay_mins":      entry_delay_mins,
-        "breakout_persistence":  tdata["persistence"],
+        "entry_delay_mins":         entry_delay_mins,
+        "breakout_persistence":     tdata["persistence"],
+        "pre_entry_breakout_pct":   pre_entry_breakout_pct,
     }

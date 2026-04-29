@@ -37,7 +37,7 @@ The strategy trades a retracement into the Opening Range after a confirmed break
 
 2% risk per trade, compounding, $100,000 starting equity:
 
-![Equity Curve](results/equity_curve.png)
+![Equity Curve](docs/equity_curve.png)
 
 ---
 
@@ -55,7 +55,7 @@ The backtest engine (`backtest/engine.py`) is built for correctness and speed:
 
 ## Analysis
 
-The full variant sweep and analysis is in [`results/NQ_ORB_15m_backtest_analysis_final.md`](results/NQ_ORB_15m_backtest_analysis_final.md), including:
+The full variant sweep and analysis is in [`docs/NQ_ORB_15m_backtest_analysis_final.md`](docs/NQ_ORB_15m_backtest_analysis_final.md), including:
 
 - 18-variant sweep per direction (3 thresholds × 3 entry levels × 2 stop types)
 - Year-by-year breakdown (2021–2026)

@@ -143,6 +143,12 @@ def get_live_structure(
     if pd.isna(last_direction):
         return "bearish"  # no history yet
 
+    # For the daily timeframe, skip the partial bar check. At ORB entry (~09:45 ET)
+    # the current day's bar has barely opened — a trader would reference yesterday's
+    # closed daily bar, not a partially-formed overnight/pre-market bar.
+    if tf == "1d":
+        return str(last_direction)
+
     # Current bar's open time and the 1m bars within it
     bar_start    = entry_time.floor(dur)
     partial_bars = bars_1m.loc[
@@ -163,6 +169,57 @@ def get_live_structure(
         return str(last_direction)
 
 
+def _find_opposite_level(
+    highs: np.ndarray, lows: np.ndarray, breakout_idx: int, direction: str
+) -> float:
+    """
+    Look back from breakout_idx to find the opposite swing level.
+
+    Implements the GT Recent High/Low indicator lookback rule (from indicator docs):
+    Go back from the breakout bar while the consecutive condition holds, then use
+    the extreme of those bars. Inside bar exception applies.
+
+    Bearish breakout (finding recent_high):
+      Go back while lows rise consecutively (L[j-1] > L[j]).
+      → recent_high = highest high of included bars.
+      → If an inside bar is found (most recent first), use its high instead.
+
+    Bullish breakout (finding recent_low):
+      Go back while highs fall consecutively (H[j-1] < H[j]).
+      → recent_low = lowest low of included bars.
+      → If an inside bar is found (most recent first), use its low instead.
+    """
+    if breakout_idx <= 0:
+        return float(highs[0]) if direction == "bearish" else float(lows[0])
+
+    included = [breakout_idx - 1]
+    j = breakout_idx - 1
+
+    if direction == "bearish":
+        while j > 0:
+            if lows[j - 1] > lows[j]:
+                included.append(j - 1)
+                j -= 1
+            else:
+                break
+        for idx in included:  # most recent first
+            if idx > 0 and highs[idx] < highs[idx - 1] and lows[idx] > lows[idx - 1]:
+                return float(highs[idx])
+        return float(max(highs[idx] for idx in included))
+
+    else:  # bullish — finding recent_low
+        while j > 0:
+            if highs[j - 1] < highs[j]:
+                included.append(j - 1)
+                j -= 1
+            else:
+                break
+        for idx in included:  # most recent first
+            if idx > 0 and highs[idx] < highs[idx - 1] and lows[idx] > lows[idx - 1]:
+                return float(lows[idx])
+        return float(min(lows[idx] for idx in included))
+
+
 def _run_tracker(bars: pd.DataFrame) -> pd.DataFrame:
     """
     Run the GT Recent High/Low swing tracker on OHLCV bars.
@@ -171,11 +228,8 @@ def _run_tracker(bars: pd.DataFrame) -> pd.DataFrame:
     columns: direction ('bullish'|'bearish'), recent_high, recent_low —
     all reflecting the state AFTER that bar has closed.
 
-    Rule (confirmed vs TradingView 2026-04-14):
-    - On breakout, the opposite level resets to the highest high (or lowest low)
-      among all interior bars since the last pivot — UNLESS any of those bars is
-      an inside bar (H < H_prev AND L > L_prev), in which case the most recent
-      inside bar's value takes priority.
+    On each breakout, the opposite level is determined by a fresh lookback
+    via _find_opposite_level() — not by accumulated interior state.
     """
     highs  = bars["high"].values.astype(float)
     lows   = bars["low"].values.astype(float)
@@ -189,78 +243,41 @@ def _run_tracker(bars: pd.DataFrame) -> pd.DataFrame:
             index=bars.index,
         )
 
-    directions  = np.empty(n, dtype="U8")
-    rec_highs   = np.empty(n, dtype=float)
-    rec_lows    = np.empty(n, dtype=float)
+    directions = np.empty(n, dtype="U8")
+    rec_highs  = np.empty(n, dtype=float)
+    rec_lows   = np.empty(n, dtype=float)
 
-    direction       = "bullish" if closes[0] >= opens[0] else "bearish"
-    recent_high     = highs[0]
-    recent_low      = lows[0]
-    interior_seen   = False
-    interim_high    = highs[0]
-    interim_low     = lows[0]
-    inside_bar_high = None
-    inside_bar_low  = None
-    prev_high       = highs[0]
-    prev_low        = lows[0]
-    directions[0]   = direction
-    rec_highs[0]    = recent_high
-    rec_lows[0]     = recent_low
+    direction   = "bullish" if closes[0] >= opens[0] else "bearish"
+    recent_high = highs[0]
+    recent_low  = lows[0]
+    directions[0] = direction
+    rec_highs[0]  = recent_high
+    rec_lows[0]   = recent_low
 
     for i in range(1, n):
         new_high = highs[i] > recent_high
         new_low  = lows[i]  < recent_low
 
         if new_high and not new_low:
-            if interior_seen:
-                recent_low = inside_bar_low if inside_bar_low is not None else interim_low
-            recent_high     = highs[i]
-            direction       = "bullish"
-            interior_seen   = False
-            interim_high    = highs[i]
-            interim_low     = lows[i]
-            inside_bar_high = None
-            inside_bar_low  = None
+            recent_low  = _find_opposite_level(highs, lows, i, "bullish")
+            recent_high = highs[i]
+            direction   = "bullish"
 
         elif new_low and not new_high:
-            if interior_seen:
-                recent_high = inside_bar_high if inside_bar_high is not None else interim_high
-            recent_low      = lows[i]
-            direction       = "bearish"
-            interior_seen   = False
-            interim_high    = highs[i]
-            interim_low     = lows[i]
-            inside_bar_high = None
-            inside_bar_low  = None
+            recent_high = _find_opposite_level(highs, lows, i, "bearish")
+            recent_low  = lows[i]
+            direction   = "bearish"
 
         elif new_high and new_low:
             if closes[i] >= opens[i]:
-                if interior_seen:
-                    recent_low = inside_bar_low if inside_bar_low is not None else interim_low
+                recent_low  = _find_opposite_level(highs, lows, i, "bullish")
                 recent_high = highs[i]
                 direction   = "bullish"
             else:
-                if interior_seen:
-                    recent_high = inside_bar_high if inside_bar_high is not None else interim_high
+                recent_high = _find_opposite_level(highs, lows, i, "bearish")
                 recent_low  = lows[i]
                 direction   = "bearish"
-            interior_seen   = False
-            interim_high    = highs[i]
-            interim_low     = lows[i]
-            inside_bar_high = None
-            inside_bar_low  = None
 
-        else:
-            # Interior bar — within current swing structure
-            interior_seen = True
-            interim_high  = max(interim_high, highs[i])
-            interim_low   = min(interim_low,  lows[i])
-            if highs[i] < prev_high and lows[i] > prev_low:
-                inside_bar_high = highs[i]
-                inside_bar_low  = lows[i]
-
-        prev_high     = highs[i]
-        prev_low      = lows[i]
         directions[i] = direction
         rec_highs[i]  = recent_high
         rec_lows[i]   = recent_low
