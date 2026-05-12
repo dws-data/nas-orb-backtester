@@ -2,35 +2,19 @@ import numpy as np
 import pandas as pd
 from backtest.volume_profile import calculate as calc_vp
 
-SPREAD_PCT         = 0.010        # fraction of ORB size added to entry/exit trigger
-STOP_BUFFER_PCT    = 0.030        # fraction of ORB size beyond stop level to ensure fill
-# At a typical 2026 ORB of ~180pts: spread=1.8pts, buffer=5.4pts
-# At a 2017 ORB of ~16pts:          spread=0.16pts, buffer=0.48pts
-LONG_THRESHOLDS    = [10, 20, 30]
-SHORT_THRESHOLDS   = [10, 20, 25, 30]
-THRESHOLDS         = [10, 20, 25, 30]
+# Strategy parameters — instrument-independent.
+LONG_THRESHOLDS    = [10, 15, 20, 30]
+SHORT_THRESHOLDS   = [10, 15, 20, 25, 30]
+THRESHOLDS         = [10, 15, 20, 25, 30]
 CONFIRMATION_TYPES = ["close"]
 
-# All times in US/Eastern (America/New_York) — handles EST/EDT automatically.
-ORB_WINDOW_MINS = 15         # ← change to 15 or 30 to switch ORB window
+# ORB_WINDOW_MINS kept at module level for backward compatibility with chart
+# scripts that import it to construct results paths. The engine uses the
+# orb_window_mins argument passed to build_day_context() instead.
+ORB_WINDOW_MINS = 15
 
-ORB_START    = "09:30"
-ORB_END      = "09:45" if ORB_WINDOW_MINS == 15 else "10:00"
-TRADE_START  = "09:46" if ORB_WINDOW_MINS == 15 else "10:01"
-ORB_MIN_BARS = 10      if ORB_WINDOW_MINS == 15 else 20
-ENTRY_CUTOFF = "14:59"
-FORCE_CLOSE  = "15:40"
-TZ           = "America/New_York"
-
-# Target mode:
-#   "fib" — ORB extreme + FIB_TARGET × ORB size  (default)
-#   "1r"  — entry + stop_dist (true 1:1R)
-TARGET_MODE = "fib"
-
-# Fib target: ORB extreme + FIB_TARGET × ORB size.
-# 1.272 — chosen 2026-04-19 based on full regime analysis (see experimental/fib_tp/compare_05_1272_2026-04-19.md).
-# Switch to 0.5 if ORB% drops below ~0.35% for a sustained period (low-vol regime).
-FIB_TARGET = 1.272
+TARGET_MODE   = "extension"
+_TARGET_MULT  = 1.0
 
 # Valid (threshold, entry_level, sl_type) combinations — separated by direction.
 #
@@ -43,12 +27,6 @@ FIB_TARGET = 1.272
 #   Long:  entry_level="val" + sl_type="vp_extreme"  → stop IS val (same level as entry)
 #   Short: entry_level="vah" + sl_type="vp_extreme"  → stop IS vah (same level as entry)
 
-# Canonical variants — 15m ORB window, 1.272x fib target.
-# Long:  10pct_poc_orb — 397 trades, 36.8% WR, +0.167R, +66.46R, -20.22R DD (updated 2026-04-20, POC beats VAH in 3/4 1h+4h regime combos)
-# Short: 25pct_poc_orb — 308 trades, 39.9% WR, +0.217R, +66.76R, -19.66R DD (updated 2026-04-20, 0 neg years vs 1 for 30pct)
-LONG_VARIANTS  = [(10, "poc", "orb")]
-SHORT_VARIANTS = [(25, "poc", "orb")]
-
 
 def _first_true(mask: np.ndarray) -> int:
     """Return index of first True in mask, or len(mask) if none."""
@@ -58,7 +36,12 @@ def _first_true(mask: np.ndarray) -> int:
     return int(idx) if mask[idx] else len(mask)
 
 
-def build_day_context(day_df: pd.DataFrame, confirm_by: str = "close") -> dict | None:
+def build_day_context(
+    day_df: pd.DataFrame,
+    cfg,
+    orb_window_mins: int = 15,
+    confirm_by: str = "close",
+) -> dict | None:
     """
     Compute ORB, VP, direction, max breakout %, and retrace flags for one day.
     All bar-scanning is vectorised with numpy — no iterrows().
@@ -69,13 +52,27 @@ def build_day_context(day_df: pd.DataFrame, confirm_by: str = "close") -> dict |
 
     Returns None if the day has insufficient data.
     """
+    from instruments.config import InstrumentConfig
+    assert isinstance(cfg, InstrumentConfig), "cfg must be an InstrumentConfig"
+
+    tz          = cfg.tz
+    orb_start   = cfg.orb_start
+    entry_cutoff = cfg.entry_cutoff
+    force_close  = cfg.force_close
+
+    # Derive ORB end and trade start from orb_start + window
+    _orb_start_ts = pd.Timestamp(f"2000-01-01 {orb_start}")
+    orb_end      = (_orb_start_ts + pd.Timedelta(minutes=orb_window_mins)).strftime("%H:%M")
+    trade_start  = (_orb_start_ts + pd.Timedelta(minutes=orb_window_mins + 1)).strftime("%H:%M")
+    orb_min_bars = orb_window_mins * 2 // 3  # ~2/3 of expected bars required
+
     if day_df.index.tz is None:
         day_df = day_df.tz_localize("UTC")
-    df = day_df.tz_convert(TZ)  # tz_convert always returns a new DataFrame — no copy needed
+    df = day_df.tz_convert(tz)
 
-    # --- ORB: 09:30–10:00 ET ---
-    orb_bars = df.between_time(ORB_START, ORB_END)
-    if len(orb_bars) < ORB_MIN_BARS:
+    # --- ORB window ---
+    orb_bars = df.between_time(orb_start, orb_end)
+    if len(orb_bars) < orb_min_bars:
         return None
 
     orb_high = float(orb_bars["high"].max())
@@ -93,8 +90,8 @@ def build_day_context(day_df: pd.DataFrame, confirm_by: str = "close") -> dict |
     poc = float(max(orb_low, min(vp["poc"], orb_high)))
     val = float(max(vp["val"], orb_low))
 
-    # Post-ORB bars: 10:05–15:40 ET — extract numpy arrays once
-    post_orb = df.between_time(TRADE_START, FORCE_CLOSE)
+    # Post-ORB bars — extract numpy arrays once
+    post_orb = df.between_time(trade_start, force_close)
     if post_orb.empty:
         return None
 
@@ -149,8 +146,8 @@ def build_day_context(day_df: pd.DataFrame, confirm_by: str = "close") -> dict |
 
     # Pre-compute cutoff/force_close as int64 ns — avoids repeated Timestamp
     # construction and expensive DatetimeIndex comparisons inside run_variant.
-    _cutoff_ns      = pd.Timestamp(f"{date} {ENTRY_CUTOFF}", tz=TZ).value
-    _force_close_ns = pd.Timestamp(f"{date} {FORCE_CLOSE}", tz=TZ).value
+    _cutoff_ns      = pd.Timestamp(f"{date} {entry_cutoff}", tz=tz).value
+    _force_close_ns = pd.Timestamp(f"{date} {force_close}",  tz=tz).value
 
     # Store raw arrays for run_variant (stripped before writing day record)
     ctx["_post_orb"]        = post_orb
@@ -166,7 +163,7 @@ def build_day_context(day_df: pd.DataFrame, confirm_by: str = "close") -> dict |
     ctx["_po_5m_close"]     = po_5m_close
     ctx["_po_5m_times_ns"]  = po_5m_times_ns
     ctx["_5m_bar_dur_ns"]   = _5m_bar_dur_ns
-    ctx["_orb_close_ns"]    = pd.Timestamp(f"{date} {ORB_END}", tz=TZ).value
+    ctx["_orb_close_ns"]    = pd.Timestamp(f"{date} {orb_end}", tz=tz).value
     ctx["_threshold_data"]  = {}
 
     if direction is None:
@@ -280,7 +277,7 @@ def build_day_context(day_df: pd.DataFrame, confirm_by: str = "close") -> dict |
     return ctx
 
 
-def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str) -> dict | None:
+def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str, cfg, target_mult: float | None = None) -> dict | None:
     """
     Evaluate a single variant on a pre-built day context.
     All bar-scanning is vectorised — no iterrows().
@@ -300,8 +297,8 @@ def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str) -
     orb_high, orb_low = ctx["orb_high"], ctx["orb_low"]
     orb_size          = ctx["orb_size"]
 
-    spread      = orb_size * SPREAD_PCT
-    stop_buffer = orb_size * STOP_BUFFER_PCT
+    spread      = orb_size * cfg.spread_pct
+    stop_buffer = orb_size * cfg.stop_buffer_pct
 
     level_price  = {"vah": vah, "poc": poc, "val": val}[entry_level]
     entry_price  = round(level_price + spread if direction == "long" else level_price - spread, 2)
@@ -321,8 +318,9 @@ def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str) -
     if TARGET_MODE == "1r":
         target_clean = (entry_price + stop_dist) if direction == "long" else (entry_price - stop_dist)
     else:
-        fib_dist     = FIB_TARGET * orb_size
-        target_clean = (orb_extreme + fib_dist) if direction == "long" else (orb_extreme - fib_dist)
+        _mult        = target_mult if target_mult is not None else _TARGET_MULT
+        target_dist  = _mult * orb_size
+        target_clean = (orb_extreme + target_dist) if direction == "long" else (orb_extreme - target_dist)
 
     # Pull pre-extracted arrays from context
     po_low      = ctx["_po_low"]
@@ -381,10 +379,10 @@ def run_variant(ctx: dict, threshold_pct: int, entry_level: str, sl_type: str) -
 
     if direction == "long":
         stop_mask   = exit_low   <= stop_clean   + spread
-        target_mask = exit_high  >= target_clean          # price tags fib level → limit order at target_clean - spread fills
+        target_mask = exit_high  >= target_clean          # price tags target level → limit order at target_clean - spread fills
     else:
         stop_mask   = exit_high  >= stop_clean   - spread
-        target_mask = exit_low   <= target_clean          # price tags fib level → limit order at target_clean + spread fills
+        target_mask = exit_low   <= target_clean          # price tags target level → limit order at target_clean + spread fills
 
     # Entry bar (index 0): target cannot fire on the same bar entry was taken.
     # For retracement entries the favourable level may have been breached

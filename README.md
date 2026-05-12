@@ -6,38 +6,42 @@ A from-scratch backtesting engine for an Opening Range Breakout retracement stra
 
 ## Strategy
 
-The strategy trades a retracement into the Opening Range after a confirmed breakout.
+The strategy trades a retracement into the Opening Range after a confirmed breakout. The retrace to a VP level provides a defined-risk entry point to participate in the continuation of the breakout beyond the original ORB extreme.
 
-**Opening Range:** 09:30–09:45 ET (15 minutes). Volume Profile (VAH, POC, VAL) is calculated from the ORB bars using 24 dynamic buckets, matching TradingView's Fixed Range Volume Profile (Row Size = 24).
+**Opening Range:** 09:30–09:45 ET (15 minutes). Volume Profile (VAH, POC, VAL) is calculated from the ORB bars.
 
 **Entry logic:**
-- Price breaks out beyond the ORB extreme by a minimum threshold (% of ORB size)
+- Price breaks out beyond the ORB extreme by a minimum threshold
 - Confirmation requires a 1m bar close beyond the threshold — no wick entries
 - After confirmation, the strategy waits for price to retrace to a VP level inside the range
 - Entry fills when price touches the level
 
 **Exit logic:**
-- Target: 1:1R (symmetric stop distance)
-- Stop: ORB extreme + buffer
-- EOD force-close: 15:40 ET
-- Entry cutoff: 14:59 ET
+- Target beyond the ORB extreme
+- Stop at the ORB extreme
+- EOD force-close and entry cutoff applied
 
-**Canonical variants (selected from 18-variant sweep per direction):**
+**Results (2021–2026, filtered, 1% risk/trade):**
 
-| Direction | Entry | Stop | Threshold | Trades | WR | Expectancy | Total R | Max DD |
-|---|---|---|---|---|---|---|---|---|
-| Long | VAH | ORB low | 10% | 484 | 53.5% | +0.063R | +30.7R | -14.9R |
-| Short | POC | ORB high | 30% | 288 | 55.2% | +0.094R | +27.1R | -11.7R |
+| Direction | Trades | WR | Expectancy | R/yr |
+|-----------|--------|----|------------|------|
+| Long | 198 | 42.9% | +0.417R | +13.8 |
+| Short | 80 | 42.5% | +0.558R | +7.4 |
+| Combined | 278 | — | — | +21.2 |
 
-*2021–2026, NQ.v.0 continuous contract, 1m OHLCV (Databento)*
+*NQ.v.0 continuous contract, 1m OHLCV (Databento)*
+
+> The project is being extended to cover additional instruments and exchanges.
 
 ---
 
 ## Equity Curve
 
-2% risk per trade, compounding, $100,000 starting equity:
+$100,000 starting equity, 1% risk per trade, compounding:
 
-![Equity Curve](docs/equity_curve.png)
+![Equity Curve](docs/equity_curve_filtered.png)
+
+![Filtered vs Unfiltered vs Buy & Hold](docs/comparison_vs_buyhold.png)
 
 ---
 
@@ -53,27 +57,7 @@ The backtest engine (`backtest/engine.py`) is built for correctness and speed:
 
 ---
 
-## Analysis
-
-The full variant sweep and analysis is in [`docs/NQ_ORB_15m_backtest_analysis_final.md`](docs/NQ_ORB_15m_backtest_analysis_final.md), including:
-
-- 18-variant sweep per direction (3 thresholds × 3 entry levels × 2 stop types)
-- Year-by-year breakdown (2021–2026)
-- Directional filter analysis across 4 timeframes (15m, 1h, 4h, 1d)
-- Edge concentrations by market structure regime
-
-**Directional filter finding:** Filtering by 1h + 4h bearish structure concentrates edge significantly:
-
-| Direction | Trades | WR | Expectancy |
-|---|---|---|---|
-| Long (1h+4h bearish) | ~103 (~20/yr) | 58.3% | +0.173R |
-| Short (1h+4h bearish) | ~140 (~27/yr) | 60.7% | +0.194R |
-
----
-
 ## Sample Charts
-
-71 sample trades (36 long, 35 short) across 2021–2026 — one win and one loss per direction per year, plus extras for 2026.
 
 | Long — Target | Long — Stop |
 |---|---|
@@ -89,7 +73,7 @@ Full sample set: [`charts/samples/`](charts/samples/)
 
 ## Stack
 
-- Python 3.11
+- Python 3.13
 - pandas, numpy, matplotlib
 - Data: Databento NQ.v.0 continuous contract (not included — see `data/README.md`)
 

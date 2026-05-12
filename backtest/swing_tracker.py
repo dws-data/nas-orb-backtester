@@ -1,5 +1,5 @@
 """
-GT Recent High/Low swing tracker — directional structure filter.
+GT Recent High/Low swing tracker.
 
 Tracks a matched pair (Recent High, Recent Low) using the same logic as the
 GT Recent High Low TradingView indicator:
@@ -30,8 +30,7 @@ Usage
     # lookup is a dict: tf -> pd.DataFrame indexed by bar CLOSE time
     # columns: direction, recent_high, recent_low
 
-    # Get live structure at entry_time (accounts for partial current bar):
-    struct = get_live_structure(lookup["4h"], bars_1m_et, entry_time, "4h")
+    struct = get_live_structure(lookup[tf], bars_1m, entry_time, tf)
     # returns 'bullish' or 'bearish'
 """
 
@@ -40,14 +39,6 @@ import pandas as pd
 from pathlib import Path
 
 _TIMEFRAMES = ["15m", "1h", "4h", "1d"]
-_TZ = "America/New_York"
-
-_PARQUET_NAMES = {
-    "15m": "NQ_continuous_15m.parquet",
-    "1h":  "NQ_continuous_1h.parquet",
-    "4h":  "NQ_continuous_4h.parquet",
-    "1d":  "NQ_continuous_1d.parquet",
-}
 
 _BAR_DURATIONS = {
     "15m": pd.Timedelta("15min"),
@@ -57,22 +48,23 @@ _BAR_DURATIONS = {
 }
 
 
-def build_structure_lookup(cache_dir: Path) -> dict[str, pd.DataFrame]:
+def build_structure_lookup(cache_dir: Path, cfg) -> dict[str, pd.DataFrame]:
     """
     Build point-in-time structure lookup from pre-built resampled parquets.
 
-    Loads NQ_continuous_{tf}.parquet for each timeframe from cache_dir,
+    Loads {parquet_prefix}_{tf}.parquet for each timeframe from cache_dir,
     runs the swing tracker, then re-indexes each result by bar CLOSE time.
 
     Parameters
     ----------
-    cache_dir : Path to folder containing NQ_continuous_*.parquet files
+    cache_dir : Path to folder containing resampled parquets
                 (built by scripts/build_resampled_parquets.py)
+    cfg       : InstrumentConfig — provides parquet_prefix and tz
 
     Returns
     -------
     dict[str, pd.DataFrame] — one DataFrame per timeframe, indexed by bar close
-    time (ET), columns: direction ('bullish'|'bearish'), recent_high, recent_low.
+    time, columns: direction ('bullish'|'bearish'), recent_high, recent_low.
 
     Use get_live_structure() rather than .asof() directly — it accounts for
     mid-bar structural flips using the 1m data.
@@ -81,11 +73,11 @@ def build_structure_lookup(cache_dir: Path) -> dict[str, pd.DataFrame]:
     result: dict[str, pd.DataFrame] = {}
 
     for tf in _TIMEFRAMES:
-        path = cache_dir / _PARQUET_NAMES[tf]
+        path = cache_dir / f"{cfg.parquet_prefix}_{tf}.parquet"
         bars = pd.read_parquet(path)
         if bars.index.tz is None:
             bars = bars.tz_localize("UTC")
-        bars = bars.tz_convert(_TZ)
+        bars = bars.tz_convert(cfg.tz)
 
         if bars.empty:
             result[tf] = pd.DataFrame(columns=["direction", "recent_high", "recent_low"])
@@ -143,14 +135,12 @@ def get_live_structure(
     if pd.isna(last_direction):
         return "bearish"  # no history yet
 
-    # For the daily timeframe, skip the partial bar check. At ORB entry (~09:45 ET)
-    # the current day's bar has barely opened — a trader would reference yesterday's
-    # closed daily bar, not a partially-formed overnight/pre-market bar.
-    if tf == "1d":
+    # Current bar's open time — derived from the levels index rather than floor(dur)
+    # so it correctly handles non-midnight anchors (e.g. Globex 4h at 22:00 UTC).
+    idx_pos   = levels.index.searchsorted(entry_time, side="right") - 1
+    if idx_pos < 0:
         return str(last_direction)
-
-    # Current bar's open time and the 1m bars within it
-    bar_start    = entry_time.floor(dur)
+    bar_start    = levels.index[idx_pos]
     partial_bars = bars_1m.loc[
         (bars_1m.index >= bar_start) & (bars_1m.index <= entry_time)
     ]

@@ -6,6 +6,8 @@ data/databento_api_key.txt
 # Generated outputs
 results/15m/
 results/30m/
+results/NQ/
+results/FTSE/
 
 # Charts — ignore everything, then explicitly allow only the public sample folders
 charts/
@@ -22,6 +24,7 @@ experimental/
 
 # Entry point / runner / visualisation
 run_no_charts.py
+run.py
 regen_charts.py
 viz_swing_logic.py
 viz_swing_real.py
@@ -30,6 +33,10 @@ viz_swing_real.py
 data/fetcher.py
 data/databento_loader.py
 data/download_continuous.py
+data/download_ftse_continuous.py
+data/download_fdax_continuous.py
+data/extend_nq.py
+data/list_fdax_symbols.py
 
 # Utility scripts
 scripts/
@@ -37,6 +44,9 @@ scripts/
 # Internal research docs
 decisions/
 features/
+filters/
+ftse/
+instruments/
 
 # Screenshots
 screenshots/
