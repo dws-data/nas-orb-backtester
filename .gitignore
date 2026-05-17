@@ -4,30 +4,25 @@ data/raw/
 data/databento_api_key.txt
 
 # Generated outputs
-results/15m/
-results/30m/
 results/NQ/
 results/FTSE/
+results/YM/
+results/GC/
 
-# Charts — ignore everything, then explicitly allow only the public sample folders
+# Charts — all private working charts (public assets live in public_charts/)
 charts/
-!charts/samples/
-!charts/samples/long/
-!charts/samples/long/**
-!charts/samples/short/
-!charts/samples/short/**
 
 logs/
 
-# Experimental / off-git work
-experimental/
+# Per-instrument research (analysis docs, scripts, charts)
+nq/
+ftse/
+ym/
+gc/
+research/
 
-# Entry point / runner / visualisation
-run_no_charts.py
+# Entry point / runner
 run.py
-regen_charts.py
-viz_swing_logic.py
-viz_swing_real.py
 
 # Data pipeline scripts
 data/fetcher.py
@@ -35,6 +30,8 @@ data/databento_loader.py
 data/download_continuous.py
 data/download_ftse_continuous.py
 data/download_fdax_continuous.py
+data/download_ym_continuous.py
+data/download_gc_continuous.py
 data/extend_nq.py
 data/list_fdax_symbols.py
 
@@ -44,8 +41,6 @@ scripts/
 # Internal research docs
 decisions/
 features/
-filters/
-ftse/
 instruments/
 
 # Screenshots

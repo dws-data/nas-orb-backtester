@@ -39,9 +39,9 @@ The strategy trades a retracement into the Opening Range after a confirmed break
 
 $100,000 starting equity, 1% risk per trade, compounding:
 
-![Equity Curve](docs/equity_curve_filtered.png)
+![Equity Curve](public_charts/equity_curve_filtered.png)
 
-![Filtered vs Unfiltered vs Buy & Hold](docs/comparison_vs_buyhold.png)
+![Filtered vs Unfiltered vs Buy & Hold](public_charts/comparison_vs_buyhold.png)
 
 ---
 
@@ -61,13 +61,13 @@ The backtest engine (`backtest/engine.py`) is built for correctness and speed:
 
 | Long — Target | Long — Stop |
 |---|---|
-| ![](charts/samples/long/2022_2022-07-13_target_long.png) | ![](charts/samples/long/2022_2022-12-16_stop_long.png) |
+| ![](public_charts/samples/long/2022_2022-07-13_target_long.png) | ![](public_charts/samples/long/2022_2022-12-16_stop_long.png) |
 
 | Short — Target | Short — Stop |
 |---|---|
-| ![](charts/samples/short/2022_2022-04-06_target_short.png) | ![](charts/samples/short/2022_2022-07-04_stop_short.png) |
+| ![](public_charts/samples/short/2022_2022-04-06_target_short.png) | ![](public_charts/samples/short/2022_2022-07-04_stop_short.png) |
 
-Full sample set: [`charts/samples/`](charts/samples/)
+Full sample set: [`public_charts/samples/`](public_charts/samples/)
 
 ---
 
