@@ -2,3 +2,8 @@ pandas
 numpy
 pyarrow
 matplotlib
+requests
+
+# Trade viewer (app.py). TradingView Lightweight Charts is vendored under
+# assets/ and inlined, so the charts need no network access.
+streamlit

@@ -2,9 +2,11 @@
 data/cache/
 data/raw/
 data/databento_api_key.txt
+data/alpaca_api_key.txt
 
 # Generated outputs
 results/NQ/
+results/QQQ/
 results/FTSE/
 results/YM/
 results/GC/

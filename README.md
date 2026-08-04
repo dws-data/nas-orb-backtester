@@ -57,6 +57,23 @@ The backtest engine (`backtest/engine.py`) is built for correctness and speed:
 
 ---
 
+## Trade Viewer
+
+```bash
+streamlit run app.py
+```
+
+An interactive viewer for the trades `run.py` writes. Pick a session and the
+entry, exit, stop, target, ORB extremes, and the opening range's volume-profile
+levels (VAH / POC / VAL) are drawn on a 1m TradingView chart, with the trade's
+full detail — MFE, MAE, duration, R — on hover. The engine evaluates the whole
+variant grid, so filter to the variants you want in the sidebar first.
+
+Built on TradingView's Lightweight Charts (Apache-2.0), vendored under
+`assets/` and inlined into the page — the charts render with no network access.
+
+---
+
 ## Sample Charts
 
 | Long — Target | Long — Stop |
